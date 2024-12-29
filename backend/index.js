@@ -3,7 +3,6 @@ const express = require("express");
 const cors = require("cors");
 const config = require("./backendConfig");
 
-// MongoDB bağlantısı
 mongoose.set("strictQuery", false);
 mongoose.connect(
   config.connectionString,
@@ -16,7 +15,6 @@ mongoose.connect(
     err ? console.log("err", err) : console.log("Connected to the database")
 );
 
-// Vendor Schema tanımı
 const VendorSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -25,117 +23,145 @@ const VendorSchema = new mongoose.Schema({
 });
 const Vendor = mongoose.model("vendors", VendorSchema);
 
-
-// Order Schema tanımı
 const OrderSchema = new mongoose.Schema({
-    name: {
-      type: String,
-      required: true,
-    },
-  });
-  const Order = mongoose.model("orders", OrderSchema);
+  name: {
+    type: String,
+    required: true,
+  },
+});
+const Order = mongoose.model("orders", OrderSchema);
 
-  // Product Schema tanımı
 const ProductSchema = new mongoose.Schema({
-    name: {
-      type: String,
-      required: true,
-    },
-  });
-  const Product = mongoose.model("parent_products", ProductSchema);
-// Express app başlatma
+  name: {
+    type: String,
+    required: true,
+  },
+});
+const Product = mongoose.model("parent_products", ProductSchema);
+
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-app.get("/vendors", async (req, res) => {
+app.get("/orders", async (req, res) => {
   try {
-    const vendors = await Vendor.find(); // Tüm vendors'u getirir
-    console.log("Vendors:", vendors); // Console'a yazdırır
-    res.json(vendors); // JSON olarak döner
+    const orders = await Order.find(); 
+    console.log("orders:", orders); 
+    res.json(orders);
   } catch (err) {
     console.error(err);
-    res.status(500).send("Error retrieving vendors");
+    res.status(500).send("Error retrieving orders");
   }
 });
-app.get("/orders", async (req, res) => {
-    try {
-      const orders = await Order.find(); // Tüm vendors'u getirir
-      console.log("orders:", orders); // Console'a yazdırır
-      res.json(orders); // JSON olarak döner
-    } catch (err) {
-      console.error(err);
-      res.status(500).send("Error retrieving orders");
-    }
-  });
-  app.get("/products", async (req, res) => {
-    try {
-      const products = await Product.find(); // Tüm vendors'u getirir
-      console.log("Products:", products); // Console'a yazdırır
-      res.json(products); // JSON olarak döner
-    } catch (err) {
-      console.error(err);
-      res.status(500).send("Error retrieving products");
-    }
-  });
 
-  app.get("/products/sales", async (req, res) => {
-    try {
-      const { vendorId } = req.query; // Vendor ID'yi sorgu parametresinden al
-      const productSales = await Order.aggregate([
-        { 
-          $unwind: "$cart_item" // cart_item array'ini aç
+app.get("/products/sales", async (req, res) => {
+  try {
+    const { vendorId } = req.query; 
+    const productSales = await Order.aggregate([
+      {
+        $unwind: "$cart_item",
+      },
+      {
+        $lookup: {
+          from: "parent_products", 
+          localField: "cart_item.product", 
+          foreignField: "_id",
+          as: "productDetails",
         },
-        {
-          $lookup: {
-            from: "parent_products", // parent_products koleksiyonuyla birleştir
-            localField: "cart_item.product", // cart_item içindeki product ID
-            foreignField: "_id", // parent_products'taki _id
-            as: "productDetails",
+      },
+      {
+        $unwind: "$productDetails", 
+      },
+      {
+        $match: {
+          "productDetails.vendor": mongoose.Types.ObjectId(vendorId), 
+        },
+      },
+      {
+        $group: {
+          _id: "$cart_item.product",
+          totalSold: { $sum: "$cart_item.item_count" }, 
+          totalRevenue: { $sum: "$cart_item.price" }, 
+          vendorId: { $first: "productDetails.vendor" }, 
+          productName: { $first: "$productDetails.name" }, 
+        },
+      },
+      {
+        $project: {
+          productId: "$_id",
+          productName: 1,
+          totalSold: 1,
+          totalRevenue: 1,
+          vendorId: 1,
+          _id: 0,
+        },
+      },
+      {
+        $sort: { totalSold: -1 }, 
+      },
+    ]);
+    res.json(productSales);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error retrieving product sales data");
+  }
+});
+
+app.get("/products/monthly-sales", async (req, res) => {
+  try {
+    const { vendorId } = req.query; 
+
+    const monthlySales = await Order.aggregate([
+      {
+        $unwind: "$cart_item", 
+      },
+      {
+        $lookup: {
+          from: "parent_products", 
+          localField: "cart_item.product", 
+          foreignField: "_id", 
+          as: "productDetails",
+        },
+      },
+      {
+        $unwind: "$productDetails", 
+      },
+      {
+        $match: {
+          "productDetails.vendor": mongoose.Types.ObjectId(vendorId), 
+        },
+      },
+      {
+        $group: {
+          _id: {
+            month: { $month: { $toDate: "$payment_at" } }, 
+            year: { $year: { $toDate: "$payment_at" } }, 
           },
+          totalSold: { $sum: "$cart_item.item_count" }, 
+          totalRevenue: { $sum: "$cart_item.price" }, 
         },
-        {
-          $unwind: "$productDetails" // productDetails'i aç
+      },
+      {
+        $project: {
+          month: "$_id.month",
+          year: "$_id.year",
+          totalSold: 1,
+          totalRevenue: 1,
+          _id: 0,
         },
-        {
-          $match: {
-            "productDetails.vendor": mongoose.Types.ObjectId(vendorId) // Vendor ID eşleşmesi
-          }
-        },
-        {
-          $group: {
-            _id: "$cart_item.product", // product ID'ye göre gruplandır
-            totalSold: { $sum: "$cart_item.item_count" }, // Toplam satılan miktar
-            totalRevenue: { $sum: "$cart_item.price" }, // Toplam gelir
-            vendorId: { $first: "productDetails.vendor" }, // Vendor ID
-            productName: { $first: "$productDetails.name" }, // Ürün adı
-          },
-        },
-        {
-          $project: {
-            productId: "$_id",
-            productName: 1,
-            totalSold: 1,
-            totalRevenue: 1,
-            vendorId: 1,
-            _id: 0, // _id'yi dışlama
-          },
-        },
-        {
-          $sort: { totalSold: -1 } // Satış miktarına göre azalan sırada
-        }
-      ]);
-      res.json(productSales);
-    } catch (err) {
-      console.error(err);
-      res.status(500).send("Error retrieving product sales data");
-    }
-  });
-  
-  
-  
+      },
+      {
+        $sort: { year: 1, month: 1 }, 
+      },
+    ]);
+
+    res.json(monthlySales);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error retrieving monthly sales data");
+  }
+});
 
 app.listen(5000, () => {
   console.log("App listening on port 5000");
 });
-
