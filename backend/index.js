@@ -45,8 +45,8 @@ app.use(cors());
 
 app.get("/orders", async (req, res) => {
   try {
-    const orders = await Order.find(); 
-    console.log("orders:", orders); 
+    const orders = await Order.find();
+    console.log("orders:", orders);
     res.json(orders);
   } catch (err) {
     console.error(err);
@@ -56,34 +56,16 @@ app.get("/orders", async (req, res) => {
 
 app.get("/products/sales", async (req, res) => {
   try {
-    const { vendorId } = req.query; 
+    const { vendorId } = req.query;
     const productSales = await Order.aggregate([
-      {
-        $unwind: "$cart_item",
-      },
-      {
-        $lookup: {
-          from: "parent_products", 
-          localField: "cart_item.product", 
-          foreignField: "_id",
-          as: "productDetails",
-        },
-      },
-      {
-        $unwind: "$productDetails", 
-      },
-      {
-        $match: {
-          "productDetails.vendor": mongoose.Types.ObjectId(vendorId), 
-        },
-      },
+      ...orderAndProductJoin(vendorId),
       {
         $group: {
           _id: "$cart_item.product",
-          totalSold: { $sum: "$cart_item.item_count" }, 
-          totalRevenue: { $sum: "$cart_item.price" }, 
-          vendorId: { $first: "productDetails.vendor" }, 
-          productName: { $first: "$productDetails.name" }, 
+          totalSold: { $sum: "$cart_item.item_count" },
+          totalRevenue: { $sum: "$cart_item.price" },
+          vendorId: { $first: "productDetails.vendor" },
+          productName: { $first: "$productDetails.name" },
         },
       },
       {
@@ -97,7 +79,7 @@ app.get("/products/sales", async (req, res) => {
         },
       },
       {
-        $sort: { totalSold: -1 }, 
+        $sort: { totalSold: -1 },
       },
     ]);
     res.json(productSales);
@@ -109,36 +91,18 @@ app.get("/products/sales", async (req, res) => {
 
 app.get("/products/monthly-sales", async (req, res) => {
   try {
-    const { vendorId } = req.query; 
+    const { vendorId } = req.query;
 
     const monthlySales = await Order.aggregate([
-      {
-        $unwind: "$cart_item", 
-      },
-      {
-        $lookup: {
-          from: "parent_products", 
-          localField: "cart_item.product", 
-          foreignField: "_id", 
-          as: "productDetails",
-        },
-      },
-      {
-        $unwind: "$productDetails", 
-      },
-      {
-        $match: {
-          "productDetails.vendor": mongoose.Types.ObjectId(vendorId), 
-        },
-      },
+      ...orderAndProductJoin(vendorId),
       {
         $group: {
           _id: {
-            month: { $month: { $toDate: "$payment_at" } }, 
-            year: { $year: { $toDate: "$payment_at" } }, 
+            month: { $month: { $toDate: "$payment_at" } },
+            year: { $year: { $toDate: "$payment_at" } },
           },
-          totalSold: { $sum: "$cart_item.item_count" }, 
-          totalRevenue: { $sum: "$cart_item.price" }, 
+          totalSold: { $sum: "$cart_item.item_count" },
+          totalRevenue: { $sum: "$cart_item.price" },
         },
       },
       {
@@ -151,7 +115,7 @@ app.get("/products/monthly-sales", async (req, res) => {
         },
       },
       {
-        $sort: { year: 1, month: 1 }, 
+        $sort: { year: 1, month: 1 },
       },
     ]);
 
@@ -162,6 +126,29 @@ app.get("/products/monthly-sales", async (req, res) => {
   }
 });
 
+const orderAndProductJoin = function (vendorId) {
+  return [
+    {
+      $unwind: "$cart_item",
+    },
+    {
+      $lookup: {
+        from: "parent_products",
+        localField: "cart_item.product",
+        foreignField: "_id",
+        as: "productDetails",
+      },
+    },
+    {
+      $unwind: "$productDetails",
+    },
+    {
+      $match: {
+        "productDetails.vendor": mongoose.Types.ObjectId(vendorId),
+      },
+    },
+  ];
+};
 app.listen(5000, () => {
   console.log("App listening on port 5000");
 });
